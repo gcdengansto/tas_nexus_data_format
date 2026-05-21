@@ -347,6 +347,7 @@ def _build_skeleton(f, meta, n_points):
     md.create_dataset("sample_type",         data=_meta(meta,"sample_type","crystal"),           dtype=str_dt)
 
     md.create_dataset("user",                data=_meta(meta,"users",["Unknown"]),               dtype=str_dt)
+    md.create_dataset("scan_no",             data=_meta(meta,"scan_no","1234567"),               dtype=str_dt)
     md.create_dataset("title",               data=_meta(meta,"title",""),                        dtype=str_dt)
     md.create_dataset("command",             data=_meta(meta,"command",""),                      dtype=str_dt)
     md.create_dataset("filename",            data=_meta(meta,"filename",""),                     dtype=str_dt)
@@ -568,6 +569,7 @@ if __name__ == "__main__":
     "distance_sample_ana":  1.5,
     "distance_ana_det":     0.5,
 
+    "scan_no":              "1234567",
     "title":                "s2 scan of Bragg (0 0 1.5)",
     "command":              "scan s2 -65 -61 0.04 mon 10000",
     "filename":             "TAIPAN_#1001235.tas.nxs.h5",

@@ -263,6 +263,125 @@ def load_from_hdf(filename, load_psd=True):
     return df, psd, scan_info
 
 
+def export_to_text(df, psd, scan_info, output_filename):
+    """
+    Exports TAS DataFrame, metadata, and PSD array to a formatted text file.
+    
+    Parameters
+    ----------
+    df : pandas DataFrame
+        DataFrame returned by load_from_hdf.
+    psd : numpy array or None
+        PSD array returned by load_from_hdf.
+    scan_info : dict
+        Metadata dictionary returned by load_from_hdf.
+    output_filename : str
+        Path for the destination text file.
+    """
+    # 1. Gather scanning axes
+    scanning_axis_str = scan_info.get("scanning_axis", "")
+    # Handle possible comma/space separated multiple scanning axes
+    scan_axes = [ax.strip() for ax in scanning_axis_str.replace(",", " ").split() if ax.strip()]
+    if not scan_axes:
+        scan_axes = ["s2"] # fallback if completely empty
+        
+    # 2. Define the exact column order requirements
+    fixed_start = ["qh", "qk", "ql", "en", "ei", "ef"]
+    fixed_middle = ["m1", "m2", "s1", "s2", "a1", "a2"]
+    fixed_end = ["counts", "monitor"] # counts maps to 'detector' in your header
+    
+    # 3. Sort the remaining columns based on instrument component order
+    # component priorities matching beamline path: source -> mono -> slits/collimators -> sample -> sample_env -> ana -> slits -> detector
+    component_order = ["vs_", "mono", "m1", "m2", "ei", "ps_", "pa_", "col_", "s1", "s2", "sg", "st", "qh", "qk", "ql", "en", "a1", "a2", "ana", "ef", "sample_", "cryo_", "counts", "monitor"]
+    
+    def get_component_priority(col_name):
+        for idx, prefix in enumerate(component_order):
+            if col_name.startswith(prefix):
+                return idx
+        return len(component_order)
+
+    remaining_cols = [c for c in df.columns if c not in scan_axes + fixed_start + fixed_middle + fixed_end]
+    remaining_cols.sort(key=get_component_priority)
+    
+    # 4. Assemble final column order for the text file
+    final_columns = list(scan_axes) + fixed_start + fixed_middle + fixed_end + remaining_cols
+    # Ensure we only include columns actually present in the DataFrame
+    final_columns = [c for c in final_columns if c in df.columns]
+    
+    # Create the export DataFrame copy and map 'counts' to 'detector' for the header print
+    export_df = df[final_columns].copy()
+    export_df.insert(0, "Pt.", range(1, len(export_df) + 1))
+    export_df = export_df.rename(columns={"counts": "detector"})
+
+    with open(output_filename, "w", encoding="utf-8") as out:
+        # 5. Write Metadata Header
+        # Mapping requested keys to the actual keys inside your scan_info dictionary
+        metadata_mapping = [
+            ("TAS_NeXus_Version", "tas_nexus_version"),
+            ("software_version", "software_version"),
+            ("filename", "filename"),
+            #
+            ("facility", "facility"),
+            ("source", "source"),
+            ("instrument", "instrument_name"),
+            ("experiment_id", "experiment_id"),
+            ("proposal", "proposal_no"),
+            ("user(s)", "users"),
+            ("local_contact", "local_contact"),
+            #
+            ("mono_crystal", "mono_crystal"),
+            ("ana_crystal", "ana_crystal"),
+            ("sense", "sense"), 
+            ("distance_vs_mono", "distance_vs_mono"),
+            ("distance_mono_sample", "distance_mono_sample"),
+            ("distance_sample_ana", "distance_sample_ana"),
+            ("distance_ana_det", "distance_ana_det"),
+            #
+            ("sample_name", "sample_name"),   
+            ("sample_type", "sample_type"),
+            ("sample_mosaic", "sample_mosaic"),
+            ("sample_v1", "sample_v1"),
+            ("sample_v2", "sample_v2"),
+            ("unit_cell", "unit_cell"),
+            ("ub_matrix", "ub_matrix"),
+            #
+            ("scan_no", "scan_no"), # placeholder fallback
+            ("scantitle", "title"),
+            ("command", "command"),
+            ("start_time", "start_time"),
+            ("end_time", "end_time"),
+            ("scanning_axis", "scanning_axis")
+        ]
+
+        
+        for header_label, info_key in metadata_mapping:
+            val = scan_info.get(info_key, "")
+            if header_label == "ub_matrix":
+                val = str(val).replace("\n", ", ")  # single-line format for the matrix
+
+            out.write(f"# {header_label} = {val}\n")
+            
+        out.write("# \n") # spacer line
+        
+        # 6. Write Column Headers and Scalar Data
+        # Format the DataFrame to text with tab-separation for tidy columns
+        df_string = export_df.to_string(index=False, index_names=False, col_space=16, justify="right")
+        # Prepend '#' to the header line
+        lines = df_string.splitlines()
+        lines[0] = "# " + lines[0]
+        
+        for line in lines:
+            out.write(line + "\n")
+            
+        # 7. Write PSD Data Slices if available
+        if psd is not None and scan_info.get("psd_present", False):
+            out.write("\n################PSD Data################\n")
+            for slice_idx in range(psd.shape[0]):
+                out.write(f"#SLICE_{slice_idx + 1:03d}\n")
+                # Save 2D matrix frame slice-by-slice
+                np.savetxt(out, psd[slice_idx], fmt="%12.1f")
+                out.write("\n")
+
 # ---------------------------------------------------------------------------
 # Self-test
 # ---------------------------------------------------------------------------
@@ -335,3 +454,8 @@ if __name__ == "__main__":
         print(f"  {tag}  {label:20s}  got={got!r}  expected={expected!r}")
 
     print(f"\n{'All round-trip checks passed.' if all_ok else 'Some checks FAILED.'}")
+
+    # Example execution within the "__main__" block:
+    txt_output_file = "test_batch_exported.txt"
+    export_to_text(df, psd, info, txt_output_file)
+    print(f"Successfully exported data to: {txt_output_file}")
